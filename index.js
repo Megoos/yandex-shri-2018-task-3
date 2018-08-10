@@ -6,10 +6,6 @@ function validator(data) {
   console.log(data);
 }
 
-function checkMinCost(rates, rateFrom, rateTo, sumPower) {
-  console.log(sumPower);
-}
-
 function normalizeRates(rates) {
   let newRates = [];
 
@@ -28,7 +24,20 @@ function normalizeRates(rates) {
 }
 
 function main() {
-  let schedule = {};
+  const result = {
+    schedule: {},
+    consumedEnergy: {
+      value: 0,
+      devices: {}
+    }
+  };
+
+  const arrayCheckMaxPower = [];
+
+  for (let index = 0; index < 24; index++) {
+    result.schedule[index] = [];
+    arrayCheckMaxPower[index] = 0;
+  }
 
   try {
     const { devices, rates, maxPower } = JSON.parse(fs.readFileSync(_path));
@@ -40,18 +49,37 @@ function main() {
     const normRates = normalizeRates(rates);
 
     devices.forEach(device => {
-      let mode = 24;
+      let start = 0;
+      let end = 24;
+      switch (device.mode) {
+        case 'day':
+          start = 7;
+          end = 21 - device.duration;
+          break;
+
+        case 'night':
+          start = 21;
+          end = 31 - device.duration;
+          break;
+
+        default:
+          break;
+      }
+
+      if (device.duration === 24) {
+        end = 1;
+      }
+
       let timeFrom = 0;
       let timeTo = 0;
       let minPwr = Infinity;
 
-      for (let i = 0; i <= 24; i++) {
+      for (let i = start; i <= end; i++) {
         let spacerTo = device.duration + i;
         let intervalRate = 0;
 
-        if (spacerTo > 23) {
+        if (spacerTo > 24) {
           spacerTo -= 24;
-
           intervalRate = [
             ...normRates.slice(i, 24),
             ...normRates.slice(0, spacerTo)
@@ -60,39 +88,59 @@ function main() {
           intervalRate = normRates.slice(i, spacerTo);
         }
 
+        let exit = false;
+        let indexCheckFrom = i;
+        do {
+          if (indexCheckFrom === 24) {
+            indexCheckFrom = 0;
+          }
+          if (arrayCheckMaxPower[indexCheckFrom] + device.power > maxPower) {
+            exit = true;
+            indexCheckFrom++;
+            break;
+          }
+
+          indexCheckFrom++;
+        } while (indexCheckFrom < spacerTo);
+
+        if (exit) {
+          continue;
+        }
+
         // кв/ч
-        const powerHours = (
-          (intervalRate.reduce((a, b) => a + b) * device.power) /
-          1000
-        ).toFixed(2);
+        const powerHours = parseFloat(
+          (
+            (intervalRate.reduce((a, b) => a + b) * device.power) /
+            1000
+          ).toFixed(2)
+        );
 
         if (powerHours < minPwr) {
           minPwr = powerHours;
           timeFrom = i;
-          timeTo = spacerTo;
+          timeTo = spacerTo - 1;
         }
       }
+      // console.log(minPwr, timeFrom, timeTo);
 
-      console.log(minPwr, timeFrom, timeTo);
+      result.consumedEnergy.value += minPwr;
+      result.consumedEnergy.devices[device.id] = minPwr;
+
+      do {
+        if (timeFrom === 24) {
+          timeFrom = 0;
+        }
+        result.schedule[timeFrom].push(device.id);
+        arrayCheckMaxPower[timeFrom] += device.power;
+        timeFrom++;
+      } while (timeFrom !== timeTo + 1);
     });
-    console.log(devices);
 
-    // devices.map(device => {
-    //   const rate = rates.find(item => {
-    //     let interval = item.to - item.from;
+    // console.log(devices);
 
-    //     if (interval < 0) {
-    //       interval += 24;
-    //     }
-
-    //     return device.duration <= interval;
-    //   });
-
-    //   console.log(rate);
-    // });
-
-    console.log(schedule);
-    // const ouput = JSON.stringify(inputData);
+    console.log(result);
+    console.log(arrayCheckMaxPower);
+    // const ouput = JSON.stringify(result);
     // fs.writeFileSync('data/output_new.json', ouput);
   } catch (e) {
     console.log(e);
