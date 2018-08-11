@@ -1,27 +1,10 @@
 const fs = require('fs');
+const normalizeRates = require('./src/normalizeRates');
+const modeSettings = require('./src/mode');
+const validator = require('./src/validator');
 
 const _path = './data/input.json';
-
-function validator(data) {
-  console.log(data);
-}
-
-function normalizeRates(rates) {
-  let newRates = [];
-
-  rates.forEach(rate => {
-    let i = rate.from;
-    do {
-      newRates[i] = rate.value;
-      i++;
-      if (i === 24) {
-        i = 0;
-      }
-    } while (i <= rate.to - 1);
-  });
-
-  return newRates;
-}
+const rounding = 4;
 
 function main() {
   const result = {
@@ -32,58 +15,42 @@ function main() {
     }
   };
 
+  // массив для хранения информации о текущей мощности на каждом промежутке времени
   const arrayCheckMaxPower = [];
 
+  // Заполняем расписание начальными данными
   for (let index = 0; index < 24; index++) {
     result.schedule[index] = [];
     arrayCheckMaxPower[index] = 0;
   }
 
   try {
-    const { devices, rates, maxPower } = JSON.parse(fs.readFileSync(_path));
+    // читаем из файла исходные данные
+    const {devices, rates, maxPower} = JSON.parse(fs.readFileSync(_path));
 
+    // сортируем устройства, от самого потребляемого до менее потребляемого
     devices.sort(function(a, b) {
       return b.duration * b.power - a.duration * a.power;
     });
 
+    // нормализуем промежутки времени
     const normRates = normalizeRates(rates);
 
     devices.forEach(device => {
-      let start = 0;
-      let end = 24;
-      switch (device.mode) {
-        case 'day':
-          start = 7;
-          end = 21 - device.duration;
-          break;
-
-        case 'night':
-          start = 21;
-          end = 31 - device.duration;
-          break;
-
-        default:
-          break;
-      }
-
-      if (device.duration === 24) {
-        end = 1;
-      }
+      // получаем настройки дня
+      const mode = modeSettings(device);
 
       let timeFrom = 0;
       let timeTo = 0;
       let minPwr = Infinity;
 
-      for (let i = start; i <= end; i++) {
+      for (let i = mode.start; i <= mode.end; i++) {
         let spacerTo = device.duration + i;
         let intervalRate = 0;
 
         if (spacerTo > 24) {
           spacerTo -= 24;
-          intervalRate = [
-            ...normRates.slice(i, 24),
-            ...normRates.slice(0, spacerTo)
-          ];
+          intervalRate = [...normRates.slice(i, 24), ...normRates.slice(0, spacerTo)];
         } else {
           intervalRate = normRates.slice(i, spacerTo);
         }
@@ -108,12 +75,7 @@ function main() {
         }
 
         // кв/ч
-        const powerHours = parseFloat(
-          (
-            (intervalRate.reduce((a, b) => a + b) * device.power) /
-            1000
-          ).toFixed(2)
-        );
+        const powerHours = +((intervalRate.reduce((a, b) => a + b) * device.power) / 1000).toFixed(rounding);
 
         if (powerHours < minPwr) {
           minPwr = powerHours;
@@ -123,7 +85,7 @@ function main() {
       }
       // console.log(minPwr, timeFrom, timeTo);
 
-      result.consumedEnergy.value += minPwr;
+      result.consumedEnergy.value = +(result.consumedEnergy.value + minPwr).toFixed(rounding);
       result.consumedEnergy.devices[device.id] = minPwr;
 
       do {
