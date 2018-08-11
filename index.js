@@ -3,10 +3,12 @@ const normalizeRates = require('./src/normalizeRates');
 const modeSettings = require('./src/mode');
 const validator = require('./src/validator');
 
-const _path = './data/input.json';
+const inputPath = './data/input.json';
+const outputPath = './data/output.json';
 const rounding = 4;
 
 function main() {
+  // структура результата
   const result = {
     schedule: {},
     consumedEnergy: {
@@ -26,7 +28,7 @@ function main() {
 
   try {
     // читаем из файла исходные данные
-    const {devices, rates, maxPower} = JSON.parse(fs.readFileSync(_path));
+    const {devices, rates, maxPower} = JSON.parse(fs.readFileSync(inputPath));
 
     // сортируем устройства, от самого потребляемого до менее потребляемого
     devices.sort(function(a, b) {
@@ -46,15 +48,10 @@ function main() {
 
       for (let i = mode.start; i <= mode.end; i++) {
         let spacerTo = device.duration + i;
-        let intervalRate = 0;
 
-        if (spacerTo > 24) {
-          spacerTo -= 24;
-          intervalRate = [...normRates.slice(i, 24), ...normRates.slice(0, spacerTo)];
-        } else {
-          intervalRate = normRates.slice(i, spacerTo);
-        }
+        if (spacerTo > 24) spacerTo -= 24;
 
+        // проверка не превышает ли maxPower на каком-то промежутке времени
         let exit = false;
         let indexCheckFrom = i;
         do {
@@ -63,28 +60,32 @@ function main() {
           }
           if (arrayCheckMaxPower[indexCheckFrom] + device.power > maxPower) {
             exit = true;
-            indexCheckFrom++;
             break;
           }
 
           indexCheckFrom++;
         } while (indexCheckFrom < spacerTo);
 
-        if (exit) {
-          continue;
-        }
+        if (exit) continue;
 
-        // кв/ч
+        // получаем интервал для промежутка времени
+        const intervalRate =
+          device.duration + i > 24
+            ? [...normRates.slice(i, 24), ...normRates.slice(0, spacerTo)]
+            : normRates.slice(i, spacerTo);
+
+        // вычисляем затраты на потребление электроэнергии
         const powerHours = +((intervalRate.reduce((a, b) => a + b) * device.power) / 1000).toFixed(rounding);
 
+        // если затраты меньше текущих запоминаем промежуток времени
         if (powerHours < minPwr) {
           minPwr = powerHours;
           timeFrom = i;
           timeTo = spacerTo - 1;
         }
       }
-      // console.log(minPwr, timeFrom, timeTo);
 
+      // записываем информацию об устройстве в результаты
       result.consumedEnergy.value = +(result.consumedEnergy.value + minPwr).toFixed(rounding);
       result.consumedEnergy.devices[device.id] = minPwr;
 
@@ -98,12 +99,8 @@ function main() {
       } while (timeFrom !== timeTo + 1);
     });
 
-    // console.log(devices);
-
-    console.log(result);
-    console.log(arrayCheckMaxPower);
-    // const ouput = JSON.stringify(result);
-    // fs.writeFileSync('data/output_new.json', ouput);
+    // записываем результаты в файл
+    fs.writeFileSync(outputPath, JSON.stringify(result));
   } catch (e) {
     console.log(e);
   }
